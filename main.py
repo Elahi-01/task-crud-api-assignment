@@ -1,20 +1,44 @@
-"""Task API — Stage 2: read endpoints with in-memory data."""
+"""A small in-memory CRUD API for managing to-do tasks."""
 
+from copy import deepcopy
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, field_validator
 from starlette.requests import Request
 
-app = FastAPI(title="Task API", version="1.0")
+app = FastAPI(
+    title="Task API",
+    version="1.0",
+    description="Create, read, update, and delete in-memory to-do tasks.",
+)
 
-# This list is the temporary in-memory data store.
-tasks: list[dict[str, Any]] = [
+SEED_TASKS: list[dict[str, Any]] = [
     {"id": 1, "title": "Learn HTTP", "done": False},
     {"id": 2, "title": "Build CRUD API", "done": False},
     {"id": 3, "title": "Test Swagger UI", "done": True},
 ]
+
+tasks: list[dict[str, Any]] = deepcopy(SEED_TASKS)
+next_task_id = 4
+
+
+class TaskCreate(BaseModel):
+    """Request body used to create a task."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_empty(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Title must not be empty")
+        return cleaned
 
 
 @app.exception_handler(HTTPException)
@@ -39,7 +63,7 @@ async def request_validation_exception_handler(
         for error in exc.errors()
     ]
     return JSONResponse(
-        status_code=400,
+        status_code=status.HTTP_400_BAD_REQUEST,
         content={"error": "Invalid request body", "details": details},
     )
 
@@ -78,3 +102,22 @@ def list_tasks() -> list[dict[str, Any]]:
 def get_task(task_id: int) -> dict[str, Any]:
     """Return one task, or HTTP 404 when its ID does not exist."""
     return find_task(task_id)
+
+
+@app.post(
+    "/tasks",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a task",
+)
+def create_task(payload: TaskCreate) -> dict[str, Any]:
+    """Create a task with the next ID and an initial done value of false."""
+    global next_task_id
+
+    new_task = {
+        "id": next_task_id,
+        "title": payload.title,
+        "done": False,
+    }
+    tasks.append(new_task)
+    next_task_id += 1
+    return new_task
