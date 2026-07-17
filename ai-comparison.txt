@@ -1,0 +1,345 @@
+diff --git a/main.py "b/ai-version\\main.py"
+index e83f588..5ee40e2 100644
+--- a/main.py
++++ "b/ai-version\\main.py"
+@@ -1,6 +1,5 @@
+-"""A small in-memory CRUD API for managing to-do tasks."""
++"""AI-generated FastAPI CRUD API for an in-memory to-do list."""
+ 
+-from copy import deepcopy
+ from typing import Any
+ 
+ from fastapi import FastAPI, HTTPException, Response, status
+@@ -9,30 +8,25 @@ from fastapi.responses import JSONResponse
+ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+ from starlette.requests import Request
+ 
++
+ app = FastAPI(
+-    title="Task API",
++    title="Task API — AI Version",
+     version="1.0",
+-    description=(
+-        "A beginner-friendly CRUD API that stores tasks in memory. "
+-        "Open this interactive documentation, choose an endpoint, "
+-        "and click **Try it out** to send a real request."
+-    ),
++    description="An in-memory CRUD API for managing to-do tasks.",
+     docs_url="/docs",
+-    redoc_url="/redoc",
+ )
+ 
+-SEED_TASKS: list[dict[str, Any]] = [
+-    {"id": 1, "title": "Learn HTTP", "done": False},
+-    {"id": 2, "title": "Build CRUD API", "done": False},
+-    {"id": 3, "title": "Test Swagger UI", "done": True},
+-]
+ 
+-tasks: list[dict[str, Any]] = deepcopy(SEED_TASKS)
+-next_task_id = 4
++class Task(BaseModel):
++    """Task returned by the API."""
++
++    id: int
++    title: str
++    done: bool
+ 
+ 
+ class TaskCreate(BaseModel):
+-    """Request body used to create a task."""
++    """Body accepted by POST /tasks."""
+ 
+     model_config = ConfigDict(extra="forbid", strict=True)
+ 
+@@ -40,15 +34,15 @@ class TaskCreate(BaseModel):
+ 
+     @field_validator("title")
+     @classmethod
+-    def title_must_not_be_empty(cls, value: str) -> str:
+-        cleaned = value.strip()
+-        if not cleaned:
++    def validate_title(cls, value: str) -> str:
++        title = value.strip()
++        if not title:
+             raise ValueError("Title must not be empty")
+-        return cleaned
++        return title
+ 
+ 
+ class TaskUpdate(BaseModel):
+-    """Request body used to update a task's title and/or completion state."""
++    """Body accepted by PUT /tasks/{task_id}."""
+ 
+     model_config = ConfigDict(extra="forbid", strict=True)
+ 
+@@ -57,66 +51,105 @@ class TaskUpdate(BaseModel):
+ 
+     @field_validator("title")
+     @classmethod
+-    def title_must_not_be_empty(cls, value: str | None) -> str | None:
++    def validate_title(cls, value: str | None) -> str:
+         if value is None:
+-            return None
+-        cleaned = value.strip()
+-        if not cleaned:
++            raise ValueError("Title cannot be null")
++
++        title = value.strip()
++        if not title:
+             raise ValueError("Title must not be empty")
+-        return cleaned
++        return title
++
++    @field_validator("done")
++    @classmethod
++    def validate_done(cls, value: bool | None) -> bool:
++        if value is None:
++            raise ValueError("Done cannot be null")
++        return value
+ 
+     @model_validator(mode="after")
+-    def at_least_one_field_is_required(self) -> "TaskUpdate":
+-        if self.title is None and self.done is None:
++    def require_at_least_one_field(self) -> "TaskUpdate":
++        if not self.model_fields_set:
+             raise ValueError("Provide title and/or done")
+         return self
+ 
+ 
+-@app.exception_handler(HTTPException)
+-async def http_exception_handler(
+-    request: Request, exc: HTTPException
+-) -> JSONResponse:
+-    """Keep every HTTP error in the required {\"error\": ...} format."""
+-    return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
++INITIAL_TASKS: list[dict[str, Any]] = [
++    {"id": 1, "title": "Learn FastAPI", "done": False},
++    {"id": 2, "title": "Build CRUD endpoints", "done": False},
++    {"id": 3, "title": "Test the API in Swagger UI", "done": True},
++]
++
++tasks: list[dict[str, Any]] = [task.copy() for task in INITIAL_TASKS]
+ 
+ 
+ @app.exception_handler(RequestValidationError)
+-async def request_validation_exception_handler(
+-    request: Request, exc: RequestValidationError
++async def validation_error_handler(
++    request: Request,
++    exc: RequestValidationError,
+ ) -> JSONResponse:
+-    """Convert FastAPI's default 422 validation response into HTTP 400."""
+-    details = [
+-        {
+-            "field": ".".join(str(part) for part in error["loc"] if part != "body")
+-            or "body",
+-            "message": error["msg"],
+-        }
+-        for error in exc.errors()
+-    ]
++    """Convert FastAPI's default validation response to HTTP 400."""
++
++    details = []
++    for error in exc.errors():
++        location = ".".join(
++            str(part) for part in error["loc"] if part not in {"body"}
++        )
++        details.append(
++            {
++                "field": location or "body",
++                "message": error["msg"],
++            }
++        )
++
+     return JSONResponse(
+         status_code=status.HTTP_400_BAD_REQUEST,
+-        content={"error": "Invalid request body", "details": details},
++        content={
++            "error": "Invalid request body",
++            "details": details,
++        },
+     )
+ 
+ 
+-def reset_tasks() -> None:
+-    """Restore the initial task list; used by the automated tests."""
+-    global tasks, next_task_id
+-    tasks = deepcopy(SEED_TASKS)
+-    next_task_id = 4
+-
++def find_task_index(task_id: int) -> int:
++    """Return the list index of a task or raise a JSON 404 error."""
+ 
+-def find_task(task_id: int) -> dict[str, Any]:
+-    """Return a task by ID or raise a JSON-formatted 404 error."""
+-    for task in tasks:
++    for index, task in enumerate(tasks):
+         if task["id"] == task_id:
+-            return task
+-    raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
++            return index
++
++    raise HTTPException(
++        status_code=status.HTTP_404_NOT_FOUND,
++        detail=f"Task {task_id} not found",
++    )
++
++
++def next_available_id() -> int:
++    """Generate an ID larger than every current task ID."""
++
++    return max((task["id"] for task in tasks), default=0) + 1
++
++
++@app.exception_handler(HTTPException)
++async def http_error_handler(
++    request: Request,
++    exc: HTTPException,
++) -> JSONResponse:
++    """Return API errors using an 'error' JSON property."""
++
++    return JSONResponse(
++        status_code=exc.status_code,
++        content={"error": str(exc.detail)},
++    )
+ 
+ 
+-@app.get("/", summary="Show API information")
+-def api_information() -> dict[str, object]:
+-    """Return the API name, version, and main resource endpoint."""
++@app.get(
++    "/",
++    summary="Show API information",
++)
++def get_api_information() -> dict[str, object]:
++    """Return basic information about the API."""
++
+     return {
+         "name": "Task API",
+         "version": "1.0",
+@@ -124,63 +157,84 @@ def api_information() -> dict[str, object]:
+     }
+ 
+ 
+-@app.get("/health", summary="Check server health")
+-def health_check() -> dict[str, str]:
+-    """Return a small response that confirms the server is alive."""
++@app.get(
++    "/health",
++    summary="Check API health",
++)
++def get_health() -> dict[str, str]:
++    """Confirm that the server is running."""
++
+     return {"status": "ok"}
+ 
+ 
+-@app.get("/tasks", summary="List all tasks")
+-def list_tasks() -> list[dict[str, Any]]:
+-    """Return the complete in-memory task list."""
++@app.get(
++    "/tasks",
++    response_model=list[Task],
++    status_code=status.HTTP_200_OK,
++    summary="List all tasks",
++)
++def get_tasks() -> list[dict[str, Any]]:
++    """Return every task stored in memory."""
++
+     return tasks
+ 
+ 
+ @app.get(
+     "/tasks/{task_id}",
++    response_model=Task,
++    status_code=status.HTTP_200_OK,
+     summary="Get one task",
+-    responses={404: {"description": "Task ID was not found"}},
++    responses={404: {"description": "Task not found"}},
+ )
+ def get_task(task_id: int) -> dict[str, Any]:
+-    """Return one task, or HTTP 404 when its ID does not exist."""
+-    return find_task(task_id)
++    """Return one task by ID."""
++
++    task_index = find_task_index(task_id)
++    return tasks[task_index]
+ 
+ 
+ @app.post(
+     "/tasks",
++    response_model=Task,
+     status_code=status.HTTP_201_CREATED,
+     summary="Create a task",
+-    responses={400: {"description": "Missing, empty, or invalid title"}},
++    responses={400: {"description": "Invalid request body"}},
+ )
+ def create_task(payload: TaskCreate) -> dict[str, Any]:
+-    """Create a task with the next ID and an initial done value of false."""
+-    global next_task_id
++    """Create a task with an automatic ID and done set to false."""
+ 
+-    new_task = {
+-        "id": next_task_id,
++    task = {
++        "id": next_available_id(),
+         "title": payload.title,
+         "done": False,
+     }
+-    tasks.append(new_task)
+-    next_task_id += 1
+-    return new_task
++    tasks.append(task)
++    return task
+ 
+ 
+ @app.put(
+     "/tasks/{task_id}",
++    response_model=Task,
++    status_code=status.HTTP_200_OK,
+     summary="Update a task",
+     responses={
+-        400: {"description": "Empty or invalid request body"},
+-        404: {"description": "Task ID was not found"},
++        400: {"description": "Invalid request body"},
++        404: {"description": "Task not found"},
+     },
+ )
+-def update_task(task_id: int, payload: TaskUpdate) -> dict[str, Any]:
+-    """Update a task's title, completion state, or both."""
+-    task = find_task(task_id)
++def update_task(
++    task_id: int,
++    payload: TaskUpdate,
++) -> dict[str, Any]:
++    """Update the title, done state, or both fields of a task."""
++
++    task_index = find_task_index(task_id)
++    task = tasks[task_index]
+ 
+-    if payload.title is not None:
++    if "title" in payload.model_fields_set:
+         task["title"] = payload.title
+-    if payload.done is not None:
++
++    if "done" in payload.model_fields_set:
+         task["done"] = payload.done
+ 
+     return task
+@@ -190,10 +244,12 @@ def update_task(task_id: int, payload: TaskUpdate) -> dict[str, Any]:
+     "/tasks/{task_id}",
+     status_code=status.HTTP_204_NO_CONTENT,
+     summary="Delete a task",
+-    responses={404: {"description": "Task ID was not found"}},
++    responses={404: {"description": "Task not found"}},
+ )
+ def delete_task(task_id: int) -> Response:
+-    """Remove a task and return an empty HTTP 204 response."""
+-    task = find_task(task_id)
+-    tasks.remove(task)
++    """Delete a task and return an empty 204 response."""
++
++    task_index = find_task_index(task_id)
++    tasks.pop(task_index)
++
+     return Response(status_code=status.HTTP_204_NO_CONTENT)
