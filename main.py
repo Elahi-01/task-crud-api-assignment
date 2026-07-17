@@ -12,7 +12,13 @@ from starlette.requests import Request
 app = FastAPI(
     title="Task API",
     version="1.0",
-    description="Create, read, update, and delete in-memory to-do tasks.",
+    description=(
+        "A beginner-friendly CRUD API that stores tasks in memory. "
+        "Open this interactive documentation, choose an endpoint, "
+        "and click **Try it out** to send a real request."
+    ),
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
 
 SEED_TASKS: list[dict[str, Any]] = [
@@ -130,7 +136,11 @@ def list_tasks() -> list[dict[str, Any]]:
     return tasks
 
 
-@app.get("/tasks/{task_id}", summary="Get one task")
+@app.get(
+    "/tasks/{task_id}",
+    summary="Get one task",
+    responses={404: {"description": "Task ID was not found"}},
+)
 def get_task(task_id: int) -> dict[str, Any]:
     """Return one task, or HTTP 404 when its ID does not exist."""
     return find_task(task_id)
@@ -140,6 +150,7 @@ def get_task(task_id: int) -> dict[str, Any]:
     "/tasks",
     status_code=status.HTTP_201_CREATED,
     summary="Create a task",
+    responses={400: {"description": "Missing, empty, or invalid title"}},
 )
 def create_task(payload: TaskCreate) -> dict[str, Any]:
     """Create a task with the next ID and an initial done value of false."""
@@ -155,7 +166,14 @@ def create_task(payload: TaskCreate) -> dict[str, Any]:
     return new_task
 
 
-@app.put("/tasks/{task_id}", summary="Update a task")
+@app.put(
+    "/tasks/{task_id}",
+    summary="Update a task",
+    responses={
+        400: {"description": "Empty or invalid request body"},
+        404: {"description": "Task ID was not found"},
+    },
+)
 def update_task(task_id: int, payload: TaskUpdate) -> dict[str, Any]:
     """Update a task's title, completion state, or both."""
     task = find_task(task_id)
@@ -172,6 +190,7 @@ def update_task(task_id: int, payload: TaskUpdate) -> dict[str, Any]:
     "/tasks/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a task",
+    responses={404: {"description": "Task ID was not found"}},
 )
 def delete_task(task_id: int) -> Response:
     """Remove a task and return an empty HTTP 204 response."""
