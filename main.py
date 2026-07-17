@@ -3,10 +3,10 @@
 from copy import deepcopy
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from starlette.requests import Request
 
 app = FastAPI(
@@ -41,6 +41,31 @@ class TaskCreate(BaseModel):
         return cleaned
 
 
+class TaskUpdate(BaseModel):
+    """Request body used to update a task's title and/or completion state."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    title: str | None = None
+    done: bool | None = None
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_empty(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Title must not be empty")
+        return cleaned
+
+    @model_validator(mode="after")
+    def at_least_one_field_is_required(self) -> "TaskUpdate":
+        if self.title is None and self.done is None:
+            raise ValueError("Provide title and/or done")
+        return self
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(
     request: Request, exc: HTTPException
@@ -66,6 +91,13 @@ async def request_validation_exception_handler(
         status_code=status.HTTP_400_BAD_REQUEST,
         content={"error": "Invalid request body", "details": details},
     )
+
+
+def reset_tasks() -> None:
+    """Restore the initial task list; used by the automated tests."""
+    global tasks, next_task_id
+    tasks = deepcopy(SEED_TASKS)
+    next_task_id = 4
 
 
 def find_task(task_id: int) -> dict[str, Any]:
@@ -121,3 +153,28 @@ def create_task(payload: TaskCreate) -> dict[str, Any]:
     tasks.append(new_task)
     next_task_id += 1
     return new_task
+
+
+@app.put("/tasks/{task_id}", summary="Update a task")
+def update_task(task_id: int, payload: TaskUpdate) -> dict[str, Any]:
+    """Update a task's title, completion state, or both."""
+    task = find_task(task_id)
+
+    if payload.title is not None:
+        task["title"] = payload.title
+    if payload.done is not None:
+        task["done"] = payload.done
+
+    return task
+
+
+@app.delete(
+    "/tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a task",
+)
+def delete_task(task_id: int) -> Response:
+    """Remove a task and return an empty HTTP 204 response."""
+    task = find_task(task_id)
+    tasks.remove(task)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
